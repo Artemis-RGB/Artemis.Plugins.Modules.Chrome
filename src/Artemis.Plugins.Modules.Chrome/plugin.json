@@ -1,0 +1,15 @@
+{
+  "Guid": "EEB9AC67-4AFF-4B05-B6DB-F5EB47D89974",
+  "Name": "Chrome Extension",
+  "Description": "Allows you to use data from your browser inside Artemis",
+  "Author": "IceBotYT",
+  "Website": "",
+  "Repository": "",
+  "Icon": "QuestionMark",
+  "Version": "1.0.0.0",
+  "Main": "Artemis.Plugins.Modules.Chrome.dll",
+  "AutoEnableProperties": true,
+  "RequiresAdmin": false,
+  "Platforms": "Windows,Linux,OSX",
+  "Api": "1.0.0"
+}
