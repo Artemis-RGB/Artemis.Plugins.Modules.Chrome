@@ -5,7 +5,7 @@
   "Author": "IceBotYT",
   "Website": "",
   "Repository": "",
-  "Icon": "QuestionMark",
+  "Icon": "GoogleChrome",
   "Version": "1.0.0.0",
   "Main": "Artemis.Plugins.Modules.Chrome.dll",
   "AutoEnableProperties": true,
