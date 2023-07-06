@@ -1,8 +1,10 @@
+using Artemis.Core;
+
 namespace Artemis.Plugins.Modules.Chrome.DataModels;
 
 // Tab implementation from the Chrome APIs
 // See here: https://developer.chrome.com/docs/extensions/reference/tabs/#type-Tab
-public class ChromeExtensionTab
+public class ChromeExtensionTab : DataModelEventArgs
 {
   public bool Active { get; set; }
   public bool Audible { get; set; }

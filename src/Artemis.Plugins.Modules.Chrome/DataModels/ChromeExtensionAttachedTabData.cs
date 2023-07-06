@@ -1,6 +1,8 @@
+using Artemis.Core;
+
 namespace Artemis.Plugins.Modules.Chrome.DataModels;
 
-public class AttachedTabData
+public class AttachedTabData : DataModelEventArgs
 {
   public int TabId { get; set; }
   public AttachInfo AttachInfo { get; set; }
@@ -8,6 +10,6 @@ public class AttachedTabData
 
 public class AttachInfo
 {
-  public int newPosition { get; set; }
-  public int newWindowId { get; set; }
+  public int NewPosition { get; set; }
+  public int NewWindowId { get; set; }
 }

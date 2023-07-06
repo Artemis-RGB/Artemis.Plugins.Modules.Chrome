@@ -1,10 +1,8 @@
-using System;
 using System.Collections.Generic;
 using System.Linq;
 using Artemis.Core.Modules;
 using Artemis.Core.Services;
 using Artemis.Plugins.Modules.Chrome.DataModels;
-using Avalonia.Remote.Protocol;
 using Newtonsoft.Json;
 using Serilog;
 
@@ -58,23 +56,30 @@ public class ChromeExtensionModule : Module<ChromeExtensionDataModel>
     private void HandleUpdatedTab(UpdatedTabData data)
     {
         JsonConvert.PopulateObject(JsonConvert.SerializeObject(data.ChangeInfo), DataModel.Tabs.Find(v => v.Id == data.TabId));
+
+        DataModel.OnTabUpdated.Trigger(data);
     }
 
     private void HandleActivatedTab(ActivatedTabData data)
     {
         DataModel.Tabs.Find(v => v.Active).Active = false;
         DataModel.Tabs.Find(v => v.Id == data.TabId).Active = true;
+
+        DataModel.OnTabActivated.Trigger(data);
     }
 
     private void HandleAttachedTab(AttachedTabData data)
     {
-        DataModel.Tabs.Find(v => v.Id == data.TabId).Index = data.AttachInfo.newPosition;
-        DataModel.Tabs.Find(v => v.Id == data.TabId).WindowId = data.AttachInfo.newWindowId;
+        DataModel.Tabs.Find(v => v.Id == data.TabId).Index = data.AttachInfo.NewPosition;
+        DataModel.Tabs.Find(v => v.Id == data.TabId).WindowId = data.AttachInfo.NewWindowId;
+
+        DataModel.OnTabAttached.Trigger(data);
     }
 
     private void HandleNewTab(ChromeExtensionTab tab)
     {
         DataModel.Tabs.Add(tab);
+        DataModel.OnNewTab.Trigger(tab);
     }
 
     private void HandleTabMoved(TabMovedData data)
@@ -91,11 +96,15 @@ public class ChromeExtensionModule : Module<ChromeExtensionDataModel>
         if (newIndex > oldIndex) newIndex--;
 
         DataModel.Tabs.Insert(newIndex, item);
+
+        DataModel.OnTabMoved.Trigger(data);
     }
 
     private void HandleClosedTab(ClosedTabData data)
     {
         DataModel.Tabs.Remove(DataModel.Tabs.Find(v => v.Id == data.TabId));
+
+        DataModel.OnTabClosed.Trigger(data);
     }
 
     private void OnProcessedRequest(object? sender, EndpointRequestEventArgs e)

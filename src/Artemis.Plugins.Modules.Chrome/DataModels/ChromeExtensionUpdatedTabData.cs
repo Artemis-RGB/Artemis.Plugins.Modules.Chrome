@@ -1,7 +1,9 @@
 namespace Artemis.Plugins.Modules.Chrome.DataModels;
+
+using Artemis.Core;
 using Newtonsoft.Json;
 
-public class UpdatedTabData
+public class UpdatedTabData : DataModelEventArgs
 {
   public int TabId { get; set; }
   public ChangeInfo ChangeInfo { get; set; }

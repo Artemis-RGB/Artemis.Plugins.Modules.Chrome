@@ -1,6 +1,8 @@
+using Artemis.Core;
+
 namespace Artemis.Plugins.Modules.Chrome.DataModels;
 
-public class TabMovedData
+public class TabMovedData : DataModelEventArgs
 {
   public int TabId { get; set; }
   public MoveInfo MoveInfo { get; set; }
