@@ -51,6 +51,8 @@ public class ChromeExtensionModule : Module<ChromeExtensionDataModel>
         var serializerSettings = new JsonSerializerSettings { ObjectCreationHandling = ObjectCreationHandling.Replace };
 
         JsonConvert.PopulateObject(data, DataModel, serializerSettings);
+
+        DataModel.ActiveTab = DataModel.Tabs.Find(v => v.Active);
     }
 
     private void HandleUpdatedTab(UpdatedTabData data)
@@ -64,6 +66,8 @@ public class ChromeExtensionModule : Module<ChromeExtensionDataModel>
     {
         DataModel.Tabs.Find(v => v.Active).Active = false;
         DataModel.Tabs.Find(v => v.Id == data.TabId).Active = true;
+
+        DataModel.ActiveTab = DataModel.Tabs.Find(v => v.Active);
 
         DataModel.OnTabActivated.Trigger(data);
     }
