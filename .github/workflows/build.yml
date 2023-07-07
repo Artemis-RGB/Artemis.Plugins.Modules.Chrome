@@ -22,5 +22,5 @@ jobs:
         uses: actions/upload-artifact@v3
         with:
           name: Artemis.Plugins.Modules.Chrome
-          path: src/Artemis.Plugins.Modules.Chrome/bin/x64/Release/net7.0/publish
+          path: src/Artemis.Plugins.Modules.Chrome/bin/Release/net7.0/publish
           if-no-files-found: error
