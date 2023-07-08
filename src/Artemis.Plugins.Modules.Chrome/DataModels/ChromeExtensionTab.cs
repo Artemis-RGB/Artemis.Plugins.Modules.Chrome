@@ -1,4 +1,5 @@
 using Artemis.Core;
+using Artemis.Core.ColorScience;
 
 namespace Artemis.Plugins.Modules.Chrome.DataModels;
 
@@ -27,4 +28,7 @@ public class ChromeExtensionTab : DataModelEventArgs
   public string URL { get; set; } = "";
   public int Width { get; set; }
   public int WindowId { get; set; }
+
+  // The following are calculated by the plugin itself and not by the Chrome APIs
+  public ColorSwatch? FavIconColors { get; set; }
 }

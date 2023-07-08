@@ -1,20 +1,28 @@
+using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
+using System.Net.Http;
+using System.Runtime.CompilerServices;
+using System.Text.RegularExpressions;
+using System.Threading.Tasks;
+using Artemis.Core.ColorScience;
 using Artemis.Core.Modules;
 using Artemis.Core.Services;
 using Artemis.Plugins.Modules.Chrome.DataModels;
 using Newtonsoft.Json;
 using Serilog;
-
+using SkiaSharp;
 
 namespace Artemis.Plugins.Modules.Chrome;
 
-public class ChromeExtensionModule : Module<ChromeExtensionDataModel>
+public partial class ChromeExtensionModule : Module<ChromeExtensionDataModel>
 {
     public override List<IModuleActivationRequirement> ActivationRequirements { get; } = new();
 
     private readonly ILogger _logger;
     private readonly IWebServerService _webServerService;
+    private readonly HttpClient _httpClient;
 
     private StringPluginEndPoint? _rawEndpoint;
     private JsonPluginEndPoint<UpdatedTabData>? _updatedTabEndpoint;
@@ -24,10 +32,14 @@ public class ChromeExtensionModule : Module<ChromeExtensionDataModel>
     private JsonPluginEndPoint<TabMovedData>? _tabMovedEndpoint;
     private JsonPluginEndPoint<ClosedTabData>? _closedTabEndpoint;
 
+    private Dictionary<string, ColorSwatch?> _cache;
+
     public ChromeExtensionModule(IWebServerService webServerService, ILogger logger)
     {
         _webServerService = webServerService;
         _logger = logger;
+        _httpClient = new HttpClient();
+        _cache = new Dictionary<string, ColorSwatch?>();
     }
 
     public override void Enable()
@@ -46,28 +58,36 @@ public class ChromeExtensionModule : Module<ChromeExtensionDataModel>
         _closedTabEndpoint.ProcessedRequest += OnProcessedRequest;
     }
 
-    private void HandleRaw(string data)
+    private async void HandleRaw(string data)
     {
         var serializerSettings = new JsonSerializerSettings { ObjectCreationHandling = ObjectCreationHandling.Replace };
 
         JsonConvert.PopulateObject(data, DataModel, serializerSettings);
 
-        DataModel.ActiveTab = DataModel.Tabs.Find(v => v.Active);
+        foreach (var tab in DataModel.Tabs)
+        {
+            _logger.Debug("calling getfaviconcolors from raw tabs " + JsonConvert.SerializeObject(tab));
+            tab.FavIconColors = await GetFavIconColors(tab.FavIconUrl);
+        }
     }
 
-    private void HandleUpdatedTab(UpdatedTabData data)
+    private async void HandleUpdatedTab(UpdatedTabData data)
     {
         JsonConvert.PopulateObject(JsonConvert.SerializeObject(data.ChangeInfo), DataModel.Tabs.Find(v => v.Id == data.TabId));
 
         DataModel.OnTabUpdated.Trigger(data);
+
+        if (data.ChangeInfo.FavIconUrl != null)
+        {
+            _logger.Debug("calling getfaviconcolors from updated tab " + JsonConvert.SerializeObject(DataModel.Tabs.Find(v => v.Id == data.TabId)));
+            DataModel.Tabs.Find(v => v.Id == data.TabId).FavIconColors = await GetFavIconColors(data.ChangeInfo.FavIconUrl);
+        }
     }
 
     private void HandleActivatedTab(ActivatedTabData data)
     {
         DataModel.Tabs.Find(v => v.Active).Active = false;
         DataModel.Tabs.Find(v => v.Id == data.TabId).Active = true;
-
-        DataModel.ActiveTab = DataModel.Tabs.Find(v => v.Active);
 
         DataModel.OnTabActivated.Trigger(data);
     }
@@ -80,8 +100,10 @@ public class ChromeExtensionModule : Module<ChromeExtensionDataModel>
         DataModel.OnTabAttached.Trigger(data);
     }
 
-    private void HandleNewTab(ChromeExtensionTab tab)
+    private async void HandleNewTab(ChromeExtensionTab tab)
     {
+        _logger.Debug("calling getfaviconcolors from new tab " + JsonConvert.SerializeObject(tab));
+        tab.FavIconColors = await GetFavIconColors(tab.FavIconUrl);
         DataModel.Tabs.Add(tab);
         DataModel.OnNewTab.Trigger(tab);
     }
@@ -123,6 +145,79 @@ public class ChromeExtensionModule : Module<ChromeExtensionDataModel>
             DataModel.AnyTabAudible = false;
             DataModel.ActiveTabAudible = false;
         }
+
+        DataModel.ActiveTab = DataModel.Tabs.Find(v => v.Active);
+    }
+
+    private async Task<ColorSwatch?> GetFavIconColors(string url)
+    {
+        _logger.Debug("getting colors for " + url);
+        lock (_cache)
+        {
+            if (_cache.TryGetValue(url, out var colors))
+            {
+                return colors;
+            }
+        }
+
+        try
+        {
+            var newSwatch = await GetFavIconColorsFromUri(url);
+            _logger.Debug("adding to cache " + JsonConvert.SerializeObject(_cache));
+            lock (_cache)
+            {
+                _cache.Add(url, newSwatch);
+                return newSwatch;
+            }
+        }
+        catch (Exception e)
+        {
+            _logger.Error(e, "Failed to get favicon colors");
+        }
+
+        return null;
+    }
+
+    private async Task<ColorSwatch?> GetFavIconColorsFromUri(string uri)
+    {
+        if (!IsDataUri(uri) && uri != "")
+        {
+            _logger.Debug(uri + " is HTTP url");
+            using Stream stream = await _httpClient.GetStreamAsync(uri);
+            using SKBitmap skbm = SKBitmap.Decode(stream);
+            SKColor[] skClrs = ColorQuantizer.Quantize(skbm.Pixels, 256);
+            return ColorQuantizer.FindAllColorVariations(skClrs, true);
+        }
+        else if (uri == "")
+        {
+            return null;
+        }
+        else
+        {
+            _logger.Debug(uri + " is data URI");
+            var matches = DataURIRegex().Match(uri);
+
+            if (matches.Groups.Count < 3)
+            {
+                throw new Exception("Invalid DataUrl format");
+            }
+
+            _logger.Debug(Convert.FromBase64String(matches.Groups["data"].Value).ToString());
+
+            Stream stream = new MemoryStream(Convert.FromBase64String(matches.Groups["data"].Value));
+
+            using SKBitmap skbm = SKBitmap.Decode(stream);
+            _logger.Debug(JsonConvert.SerializeObject(skbm, Formatting.Indented));
+            SKColor[] skClrs = ColorQuantizer.Quantize(skbm.Pixels, 256);
+            return ColorQuantizer.FindAllColorVariations(skClrs, true);
+        }
+    }
+
+    private static bool IsDataUri(string input)
+    {
+        string pattern = @"^data:[a-zA-Z0-9\/\+]+;base64,([a-zA-Z0-9\/\+=])+$";
+
+        return Regex.IsMatch(input, pattern);
     }
 
     public override void Disable()
@@ -150,4 +245,8 @@ public class ChromeExtensionModule : Module<ChromeExtensionDataModel>
     {
 
     }
+
+    [GeneratedRegex("data:(?<type>.+?);base64,(?<data>.+)")]
+    private static partial Regex DataURIRegex();
+
 }
