@@ -24,7 +24,6 @@ public partial class ChromeExtensionModule : Module<ChromeDataModel>
     {
         //todo: verify that these are the correct process names
         new ProcessActivationRequirement("chrome"),
-        new ProcessActivationRequirement("chromium"),
         new ProcessActivationRequirement("msedge"),
         new ProcessActivationRequirement("opera"),
         new ProcessActivationRequirement("brave")
