@@ -20,7 +20,15 @@ namespace Artemis.Plugins.Modules.Chrome;
 
 public partial class ChromeExtensionModule : Module<ChromeDataModel>
 {
-    public override List<IModuleActivationRequirement> ActivationRequirements { get; } = new();
+    public override List<IModuleActivationRequirement> ActivationRequirements { get; } = new()
+    {
+        //todo: verify that these are the correct process names
+        new ProcessActivationRequirement("chrome"),
+        new ProcessActivationRequirement("chromium"),
+        new ProcessActivationRequirement("msedge"),
+        new ProcessActivationRequirement("opera"),
+        new ProcessActivationRequirement("brave")
+    };
     
     private readonly Dictionary<string, ColorSwatch> _cache;
     private readonly ILogger _logger;
@@ -41,7 +49,6 @@ public partial class ChromeExtensionModule : Module<ChromeDataModel>
 
     public override void Enable()
     {
-        _firstRun = true;
         _webServerService.AddResponsiveJsonEndPoint<TabUpdated>(this, "tabUpdated", data =>
         {
             OnTabUpdated(data);
@@ -84,6 +91,23 @@ public partial class ChromeExtensionModule : Module<ChromeDataModel>
             
             return Respond();
         });
+    }
+    
+    public override void Disable()
+    {
+    }
+
+    public override void ModuleActivated(bool isOverride)
+    {
+        _firstRun = true;
+    }
+
+    public override void ModuleDeactivated(bool isOverride)
+    {
+    }
+
+    public override void Update(double deltaTime)
+    {
     }
 
     /// <summary>
@@ -211,21 +235,6 @@ public partial class ChromeExtensionModule : Module<ChromeDataModel>
         }
     }
 
-    public override void Disable()
-    {
-    }
-
-    public override void ModuleActivated(bool isOverride)
-    {
-    }
-
-    public override void ModuleDeactivated(bool isOverride)
-    {
-    }
-
-    public override void Update(double deltaTime)
-    {
-    }
 
     #region FavIconColors
 
