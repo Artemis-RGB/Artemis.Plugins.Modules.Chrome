@@ -1,11 +1,12 @@
 using Artemis.Core;
 using Artemis.Core.ColorScience;
+using Artemis.Core.Modules;
 
 namespace Artemis.Plugins.Modules.Chrome.DataModels;
 
 // Tab implementation from the Chrome APIs
 // See here: https://developer.chrome.com/docs/extensions/reference/tabs/#type-Tab
-public class ChromeExtensionTab : DataModelEventArgs
+public class Tab : DataModelEventArgs
 {
   public bool Active { get; set; }
   public bool Audible { get; set; }
@@ -30,5 +31,7 @@ public class ChromeExtensionTab : DataModelEventArgs
   public int WindowId { get; set; }
 
   // The following are calculated by the plugin itself and not by the Chrome APIs
-  public ColorSwatch? FavIconColors { get; set; }
+  public ColorSwatch FavIconColors { get; set; }
+
+  [DataModelIgnore] internal bool ColorCalculated { get; set; } = false;
 }

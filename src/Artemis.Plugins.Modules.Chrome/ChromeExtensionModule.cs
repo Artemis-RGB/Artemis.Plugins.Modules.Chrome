@@ -5,113 +5,153 @@ using System.Linq;
 using System.Net.Http;
 using System.Runtime.CompilerServices;
 using System.Text.RegularExpressions;
+using System.Threading;
 using System.Threading.Tasks;
 using Artemis.Core.ColorScience;
 using Artemis.Core.Modules;
 using Artemis.Core.Services;
 using Artemis.Plugins.Modules.Chrome.DataModels;
+using EmbedIO;
 using Newtonsoft.Json;
 using Serilog;
 using SkiaSharp;
 
 namespace Artemis.Plugins.Modules.Chrome;
 
-public partial class ChromeExtensionModule : Module<ChromeExtensionDataModel>
+public partial class ChromeExtensionModule : Module<ChromeDataModel>
 {
     public override List<IModuleActivationRequirement> ActivationRequirements { get; } = new();
-
+    
+    private readonly Dictionary<string, ColorSwatch> _cache;
     private readonly ILogger _logger;
     private readonly IWebServerService _webServerService;
     private readonly HttpClient _httpClient;
+    private readonly SemaphoreSlim _semaphore = new(1, 1);
 
-    private StringPluginEndPoint? _rawEndpoint;
-    private JsonPluginEndPoint<UpdatedTabData>? _updatedTabEndpoint;
-    private JsonPluginEndPoint<ActivatedTabData>? _activatedTabEndpoint;
-    private JsonPluginEndPoint<AttachedTabData>? _attachedTabEndpoint;
-    private JsonPluginEndPoint<ChromeExtensionTab>? _newTabEndpoint;
-    private JsonPluginEndPoint<TabMovedData>? _tabMovedEndpoint;
-    private JsonPluginEndPoint<ClosedTabData>? _closedTabEndpoint;
-
-    private Dictionary<string, ColorSwatch?> _cache;
+    private bool _firstRun;
 
     public ChromeExtensionModule(IWebServerService webServerService, ILogger logger)
     {
         _webServerService = webServerService;
         _logger = logger;
         _httpClient = new HttpClient();
-        _cache = new Dictionary<string, ColorSwatch?>();
+        _cache = new Dictionary<string, ColorSwatch>();
+        _firstRun = true;
     }
 
     public override void Enable()
     {
-        _rawEndpoint = _webServerService.AddStringEndPoint(this, "raw", HandleRaw);
-        _updatedTabEndpoint = _webServerService.AddJsonEndPoint<UpdatedTabData>(this, "updatedTab", HandleUpdatedTab);
-        _activatedTabEndpoint = _webServerService.AddJsonEndPoint<ActivatedTabData>(this, "activatedTab", HandleActivatedTab);
-        _attachedTabEndpoint = _webServerService.AddJsonEndPoint<AttachedTabData>(this, "attachedTab", HandleAttachedTab);
-        _newTabEndpoint = _webServerService.AddJsonEndPoint<ChromeExtensionTab>(this, "newTab", HandleNewTab);
-        _tabMovedEndpoint = _webServerService.AddJsonEndPoint<TabMovedData>(this, "tabMoved", HandleTabMoved);
-        _closedTabEndpoint = _webServerService.AddJsonEndPoint<ClosedTabData>(this, "closedTab", HandleClosedTab);
-
-        _rawEndpoint.ProcessedRequest += OnProcessedRequest;
-        _updatedTabEndpoint.ProcessedRequest += OnProcessedRequest;
-        _activatedTabEndpoint.ProcessedRequest += OnProcessedRequest;
-        _closedTabEndpoint.ProcessedRequest += OnProcessedRequest;
-    }
-
-    private async void HandleRaw(string data)
-    {
-        var serializerSettings = new JsonSerializerSettings { ObjectCreationHandling = ObjectCreationHandling.Replace };
-
-        JsonConvert.PopulateObject(data, DataModel, serializerSettings);
-
-        foreach (var tab in DataModel.Tabs)
+        _firstRun = true;
+        _webServerService.AddResponsiveJsonEndPoint<TabUpdated>(this, "tabUpdated", data =>
         {
-            _logger.Debug("calling getfaviconcolors from raw tabs " + JsonConvert.SerializeObject(tab));
-            tab.FavIconColors = await GetFavIconColors(tab.FavIconUrl);
-        }
+            OnTabUpdated(data);
+            UpdateTabData();
+
+            return Respond();
+        });
+        _webServerService.AddResponsiveJsonEndPoint<TabActivated>(this, "tabActivated", data =>
+        {
+            OnTabActivated(data);
+            UpdateTabData();
+
+            return Respond();
+        });
+        _webServerService.AddResponsiveJsonEndPoint<Tab>(this, "tabCreated", data =>
+        {
+            OnTabCreated(data);
+            UpdateTabData();
+
+            return Respond();
+        });
+        _webServerService.AddResponsiveJsonEndPoint<TabMoved>(this, "tabMoved", data =>
+        {
+            OnTabMoved(data);
+            UpdateTabData();
+
+            return Respond();
+        });
+        _webServerService.AddResponsiveJsonEndPoint<TabClosed>(this, "tabClosed", data =>
+        {
+            OnTabClosed(data);
+            UpdateTabData();
+
+            return Respond();
+        });
+        _webServerService.AddResponsiveJsonEndPoint<Tab[]>(this, "setAllTabs", data =>
+        {
+            OnSetAllTabs(data);
+            UpdateTabData();
+            
+            return Respond();
+        });
     }
 
-    private async void HandleUpdatedTab(UpdatedTabData data)
+    /// <summary>
+    ///     Responds to Chrome's POST request with a JSON object containing the firstRequest property.
+    ///     This will be true if Chrome was already running when the plugin was enabled, false otherwise.
+    ///     This is used to determine whether or not to send the entire list of tabs to the plugin.
+    /// </summary>
+    private object? Respond()
     {
-        JsonConvert.PopulateObject(JsonConvert.SerializeObject(data.ChangeInfo), DataModel.Tabs.Find(v => v.Id == data.TabId));
+        if (!_firstRun)
+        {
+            return new
+            {
+                firstRequest = false
+            };
+        }
+
+        _firstRun = false;
+        return new
+        {
+            firstRequest = true
+        };
+    }
+    
+    private void OnSetAllTabs(Tab[] data)
+    {
+        DataModel.Tabs.Clear();
+        DataModel.Tabs.AddRange(data);
+    }
+
+    private void OnTabUpdated(TabUpdated data)
+    {
+        var updatedTab = DataModel.Tabs.Find(v => v.Id == data.TabId);
+        if (updatedTab == null)
+            return;
+        
+        JsonConvert.PopulateObject(JsonConvert.SerializeObject(data.ChangeInfo), updatedTab);
 
         DataModel.OnTabUpdated.Trigger(data);
-
-        if (data.ChangeInfo.FavIconUrl != null)
-        {
-            _logger.Debug("calling getfaviconcolors from updated tab " + JsonConvert.SerializeObject(DataModel.Tabs.Find(v => v.Id == data.TabId)));
-            DataModel.Tabs.Find(v => v.Id == data.TabId).FavIconColors = await GetFavIconColors(data.ChangeInfo.FavIconUrl);
-        }
     }
 
-    private void HandleActivatedTab(ActivatedTabData data)
+    private void OnTabActivated(TabActivated data)
     {
-        DataModel.Tabs.Find(v => v.Active).Active = false;
-        DataModel.Tabs.Find(v => v.Id == data.TabId).Active = true;
+        var activeTab = DataModel.Tabs.Find(v => v.Active);
+        var thisTab = DataModel.Tabs.Find(v => v.Id == data.TabId);
+
+        if (activeTab != null)
+            activeTab.Active = false;
+        if (thisTab != null)
+            thisTab.Active = true;
 
         DataModel.OnTabActivated.Trigger(data);
     }
 
-    private void HandleAttachedTab(AttachedTabData data)
+    private void OnTabCreated(Tab tab)
     {
-        DataModel.Tabs.Find(v => v.Id == data.TabId).Index = data.AttachInfo.NewPosition;
-        DataModel.Tabs.Find(v => v.Id == data.TabId).WindowId = data.AttachInfo.NewWindowId;
-
-        DataModel.OnTabAttached.Trigger(data);
-    }
-
-    private async void HandleNewTab(ChromeExtensionTab tab)
-    {
-        _logger.Debug("calling getfaviconcolors from new tab " + JsonConvert.SerializeObject(tab));
-        tab.FavIconColors = await GetFavIconColors(tab.FavIconUrl);
         DataModel.Tabs.Add(tab);
         DataModel.OnNewTab.Trigger(tab);
     }
 
-    private void HandleTabMoved(TabMovedData data)
+    private void OnTabMoved(TabMoved data)
     {
-        DataModel.Tabs.Find(v => v.Id == data.TabId).Index = data.MoveInfo.ToIndex;
-        DataModel.Tabs.Find(v => v.Id == data.TabId).WindowId = data.MoveInfo.WindowId;
+        var tab = DataModel.Tabs.Find(v => v.Id == data.TabId);
+        if (tab != null)
+        {
+            tab.Index = data.MoveInfo.ToIndex;
+            tab.WindowId = data.MoveInfo.WindowId;
+        }
 
         var item = DataModel.Tabs.Find(v => v.Id == data.TabId);
         var oldIndex = DataModel.Tabs.FindIndex(v => v.Id == data.TabId);
@@ -126,127 +166,121 @@ public partial class ChromeExtensionModule : Module<ChromeExtensionDataModel>
         DataModel.OnTabMoved.Trigger(data);
     }
 
-    private void HandleClosedTab(ClosedTabData data)
+    private void OnTabClosed(TabClosed data)
     {
-        DataModel.Tabs.Remove(DataModel.Tabs.Find(v => v.Id == data.TabId));
+        var toRemove = DataModel.Tabs.Find(v => v.Id == data.TabId);
+        if (toRemove != null)
+            DataModel.Tabs.Remove(toRemove);
 
         DataModel.OnTabClosed.Trigger(data);
     }
 
-    private void OnProcessedRequest(object? sender, EndpointRequestEventArgs e)
+    private void UpdateTabData()
     {
-        if (DataModel.Tabs.Count > 0)
+        if (DataModel.Tabs.Any())
         {
             DataModel.AnyTabAudible = DataModel.Tabs.Any(v => v.Audible);
-            DataModel.ActiveTabAudible = DataModel.Tabs.Find(v => v.Active).Audible;
+            DataModel.ActiveTabAudible = DataModel.Tabs.Find(v => v.Active)?.Audible ?? false;
+            DataModel.ActiveTab = DataModel.Tabs.Find(v => v.Active);
         }
         else
         {
             DataModel.AnyTabAudible = false;
             DataModel.ActiveTabAudible = false;
+            DataModel.ActiveTab = null;
         }
 
-        DataModel.ActiveTab = DataModel.Tabs.Find(v => v.Active);
+        foreach (var tab in DataModel.Tabs)
+        {
+            if (!tab.ColorCalculated)
+            {
+                Task.Run(async () =>
+                {
+                    try
+                    {
+                        tab.FavIconColors = await GetFavIconColors(tab.FavIconUrl);
+                    }
+                    catch (Exception e)
+                    {
+                        _logger.Error(e, "Failed to get favicon colors for {Title} with uri {Uri}", tab.Title, tab.FavIconUrl);
+                        tab.FavIconColors = default;
+                    }
+                    tab.ColorCalculated = true;
+                });
+            }            
+        }
     }
 
-    private async Task<ColorSwatch?> GetFavIconColors(string url)
+    public override void Disable()
     {
-        _logger.Debug("getting colors for " + url);
-        lock (_cache)
-        {
-            if (_cache.TryGetValue(url, out var colors))
-            {
-                return colors;
-            }
-        }
+    }
+
+    public override void ModuleActivated(bool isOverride)
+    {
+    }
+
+    public override void ModuleDeactivated(bool isOverride)
+    {
+    }
+
+    public override void Update(double deltaTime)
+    {
+    }
+
+    #region FavIconColors
+
+    [GeneratedRegex("data:(?<type>.+?);base64,(?<data>.+)")]
+    private static partial Regex DataUriRegex();
+    
+    private async Task<ColorSwatch> GetFavIconColors(string url)
+    {
+        if (string.IsNullOrEmpty(url))
+            return default;
+        
+        await _semaphore.WaitAsync();
+
+        if (_cache.TryGetValue(url, out var colors))
+            return colors;
 
         try
         {
             var newSwatch = await GetFavIconColorsFromUri(url);
-            _logger.Debug("adding to cache " + JsonConvert.SerializeObject(_cache));
-            lock (_cache)
-            {
-                _cache.Add(url, newSwatch);
-                return newSwatch;
-            }
+            _cache.Add(url, newSwatch);
+            return newSwatch;
         }
-        catch (Exception e)
+        finally
         {
-            _logger.Error(e, "Failed to get favicon colors");
+            _semaphore.Release();
         }
-
-        return null;
     }
 
-    private async Task<ColorSwatch?> GetFavIconColorsFromUri(string uri)
+    private async Task<ColorSwatch> GetFavIconColorsFromUri(string uri)
     {
-        if (!IsDataUri(uri) && uri != "")
+        //TODO: this seems to work for *.ico but some PNGs broke. Still, no more concurrency issues
+        var matches = DataUriRegex().Match(uri);
+        if (!matches.Success)
         {
-            _logger.Debug(uri + " is HTTP url");
-            using Stream stream = await _httpClient.GetStreamAsync(uri);
-            using SKBitmap skbm = SKBitmap.Decode(stream);
-            SKColor[] skClrs = ColorQuantizer.Quantize(skbm.Pixels, 256);
-            return ColorQuantizer.FindAllColorVariations(skClrs, true);
-        }
-        else if (uri == "")
-        {
-            return null;
+            await using var stream = await _httpClient.GetStreamAsync(uri);
+            using var codec = SKCodec.Create(stream);
+            using var skBitmap = SKBitmap.Decode(codec);
+            var colors = ColorQuantizer.Quantize(skBitmap.Pixels, 256);
+            return ColorQuantizer.FindAllColorVariations(colors, true);
         }
         else
         {
-            _logger.Debug(uri + " is data URI");
-            var matches = DataURIRegex().Match(uri);
-
             if (matches.Groups.Count < 3)
             {
                 throw new Exception("Invalid DataUrl format");
             }
 
-            _logger.Debug(Convert.FromBase64String(matches.Groups["data"].Value).ToString());
-
-            Stream stream = new MemoryStream(Convert.FromBase64String(matches.Groups["data"].Value));
-
-            using SKBitmap skbm = SKBitmap.Decode(stream);
-            _logger.Debug(JsonConvert.SerializeObject(skbm, Formatting.Indented));
-            SKColor[] skClrs = ColorQuantizer.Quantize(skbm.Pixels, 256);
+            using var stream = new MemoryStream(Convert.FromBase64String(matches.Groups["data"].Value));
+            using var codec = SKCodec.Create(stream);
+            using var skBitmap = SKBitmap.Decode(codec);
+            var skClrs = ColorQuantizer.Quantize(skBitmap.Pixels, 256);
             return ColorQuantizer.FindAllColorVariations(skClrs, true);
         }
     }
-
-    private static bool IsDataUri(string input)
-    {
-        string pattern = @"^data:[a-zA-Z0-9\/\+]+;base64,([a-zA-Z0-9\/\+=])+$";
-
-        return Regex.IsMatch(input, pattern);
-    }
-
-    public override void Disable()
-    {
-        _webServerService.RemovePluginEndPoint(_rawEndpoint);
-        _webServerService.RemovePluginEndPoint(_updatedTabEndpoint);
-        _webServerService.RemovePluginEndPoint(_activatedTabEndpoint);
-        _webServerService.RemovePluginEndPoint(_attachedTabEndpoint);
-        _webServerService.RemovePluginEndPoint(_newTabEndpoint);
-        _webServerService.RemovePluginEndPoint(_tabMovedEndpoint);
-        _webServerService.RemovePluginEndPoint(_closedTabEndpoint);
-    }
-
-    public override void ModuleActivated(bool isOverride)
-    {
-
-    }
-
-    public override void ModuleDeactivated(bool isOverride)
-    {
-
-    }
-
-    public override void Update(double deltaTime)
-    {
-
-    }
-
-    [GeneratedRegex("data:(?<type>.+?);base64,(?<data>.+)")]
-    private static partial Regex DataURIRegex();
+    
+    #endregion
 
 }
