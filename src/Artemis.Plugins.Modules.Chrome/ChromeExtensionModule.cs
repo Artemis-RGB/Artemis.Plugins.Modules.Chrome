@@ -42,8 +42,8 @@ public partial class ChromeExtensionModule : Module<ChromeDataModel>
     {
         _webServerService = webServerService;
         _logger = logger;
-        _httpClient = new HttpClient();
-        _cache = new Dictionary<string, ColorSwatch>();
+        _httpClient = new();
+        _cache = new();
         _firstRun = true;
     }
 
@@ -115,21 +115,16 @@ public partial class ChromeExtensionModule : Module<ChromeDataModel>
     ///     This will be true if Chrome was already running when the plugin was enabled, false otherwise.
     ///     This is used to determine whether or not to send the entire list of tabs to the plugin.
     /// </summary>
-    private object? Respond()
+    private object Respond()
     {
-        if (!_firstRun)
+        var response = new
         {
-            return new
-            {
-                firstRequest = false
-            };
-        }
-
-        _firstRun = false;
-        return new
-        {
-            firstRequest = true
+            firstRequest = _firstRun
         };
+        
+        _firstRun = false;
+        
+        return response;
     }
     
     private void OnSetAllTabs(Tab[] data)
@@ -144,8 +139,15 @@ public partial class ChromeExtensionModule : Module<ChromeDataModel>
         if (updatedTab == null)
             return;
         
+        var previousFavicon = updatedTab.FavIconUrl;
+        
         JsonConvert.PopulateObject(JsonConvert.SerializeObject(data.ChangeInfo), updatedTab);
 
+        if (updatedTab.FavIconUrl != previousFavicon)
+        {
+            updatedTab.ColorCalculated = false;
+        }
+        
         DataModel.OnTabUpdated.Trigger(data);
     }
 
@@ -216,25 +218,37 @@ public partial class ChromeExtensionModule : Module<ChromeDataModel>
 
         foreach (var tab in DataModel.Tabs)
         {
-            if (!tab.ColorCalculated)
+            //tab is loading or otherwise unavailable
+            if (tab.Status != "complete")
+                continue;
+            
+            //tab has already been calculated, skip
+            if (tab.ColorCalculated)
+                continue;
+            
+            //tab has no favicon
+            if (string.IsNullOrEmpty(tab.FavIconUrl))
             {
-                Task.Run(async () =>
+                tab.FavIconColors = default;
+                tab.ColorCalculated = true;
+                continue;
+            }
+
+            Task.Run(async () =>
+            {
+                try
                 {
-                    try
-                    {
-                        tab.FavIconColors = await GetFavIconColors(tab.FavIconUrl);
-                    }
-                    catch (Exception e)
-                    {
-                        _logger.Error(e, "Failed to get favicon colors for {Title} with uri {Uri}", tab.Title, tab.FavIconUrl);
-                        tab.FavIconColors = default;
-                    }
-                    tab.ColorCalculated = true;
-                });
-            }            
+                    tab.FavIconColors = await GetFavIconColors(tab.FavIconUrl);
+                }
+                catch (Exception e)
+                {
+                    _logger.Error(e, "Failed to get favicon colors for {Title} with uri {Uri}", tab.Title, tab.FavIconUrl);
+                    tab.FavIconColors = default;
+                }
+                tab.ColorCalculated = true;
+            });
         }
     }
-
 
     #region FavIconColors
 
@@ -244,17 +258,17 @@ public partial class ChromeExtensionModule : Module<ChromeDataModel>
     private async Task<ColorSwatch> GetFavIconColors(string url)
     {
         if (string.IsNullOrEmpty(url))
-            return default;
+            throw new ArgumentException("Value cannot be null or empty.", nameof(url));
         
         await _semaphore.WaitAsync();
 
-        if (_cache.TryGetValue(url, out var colors))
-            return colors;
-
         try
         {
+            if (_cache.TryGetValue(url, out var colors))
+                return colors;
+
             var newSwatch = await GetFavIconColorsFromUri(url);
-            _cache.Add(url, newSwatch);
+            _cache[url] = newSwatch;
             return newSwatch;
         }
         finally
