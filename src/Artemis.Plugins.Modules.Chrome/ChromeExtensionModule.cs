@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Net.Http;
-using System.Runtime.CompilerServices;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
@@ -11,7 +10,7 @@ using Artemis.Core.ColorScience;
 using Artemis.Core.Modules;
 using Artemis.Core.Services;
 using Artemis.Plugins.Modules.Chrome.DataModels;
-using EmbedIO;
+using Avalonia.Markup.Xaml;
 using Newtonsoft.Json;
 using Serilog;
 using SkiaSharp;
@@ -30,7 +29,7 @@ public partial class ChromeExtensionModule : Module<ChromeDataModel>
         new ProcessActivationRequirement("opera"),
         new ProcessActivationRequirement("brave")
     };
-    
+
     private readonly Dictionary<string, ColorSwatch> _cache;
     private readonly ILogger _logger;
     private readonly IWebServerService _webServerService;
@@ -89,11 +88,18 @@ public partial class ChromeExtensionModule : Module<ChromeDataModel>
         {
             OnSetAllTabs(data);
             UpdateTabData();
-            
+
+            return Respond();
+        });
+        _webServerService.AddResponsiveJsonEndPoint<bool>(this, "setFullscreen", data =>
+        {
+            OnSetFullScreen(data);
+            UpdateTabData();
+
             return Respond();
         });
     }
-    
+
     public override void Disable()
     {
     }
@@ -122,16 +128,21 @@ public partial class ChromeExtensionModule : Module<ChromeDataModel>
         {
             firstRequest = _firstRun
         };
-        
+
         _firstRun = false;
-        
+
         return response;
     }
-    
+
     private void OnSetAllTabs(Tab[] data)
     {
         DataModel.Tabs.Clear();
         DataModel.Tabs.AddRange(data);
+    }
+
+    private void OnSetFullScreen(bool data)
+    {
+        DataModel.IsInFullscreen = data;
     }
 
     private void OnTabUpdated(TabUpdated data)
@@ -139,16 +150,16 @@ public partial class ChromeExtensionModule : Module<ChromeDataModel>
         var updatedTab = DataModel.Tabs.Find(v => v.Id == data.TabId);
         if (updatedTab == null)
             return;
-        
+
         var previousFavicon = updatedTab.FavIconUrl;
-        
+
         JsonConvert.PopulateObject(JsonConvert.SerializeObject(data.ChangeInfo), updatedTab);
 
         if (updatedTab.FavIconUrl != previousFavicon)
         {
             updatedTab.ColorCalculated = false;
         }
-        
+
         DataModel.OnTabUpdated.Trigger(data);
     }
 
@@ -222,11 +233,11 @@ public partial class ChromeExtensionModule : Module<ChromeDataModel>
             //tab is loading or otherwise unavailable
             if (tab.Status != "complete")
                 continue;
-            
+
             //tab has already been calculated, skip
             if (tab.ColorCalculated)
                 continue;
-            
+
             //tab has no favicon
             if (string.IsNullOrEmpty(tab.FavIconUrl))
             {
@@ -255,12 +266,12 @@ public partial class ChromeExtensionModule : Module<ChromeDataModel>
 
     [GeneratedRegex("data:(?<type>.+?);base64,(?<data>.+)")]
     private static partial Regex DataUriRegex();
-    
+
     private async Task<ColorSwatch> GetFavIconColors(string url)
     {
         if (string.IsNullOrEmpty(url))
             throw new ArgumentException("Value cannot be null or empty.", nameof(url));
-        
+
         await _semaphore.WaitAsync();
 
         try
@@ -292,13 +303,13 @@ public partial class ChromeExtensionModule : Module<ChromeDataModel>
 
             return GetColorsFromSvg(svgStream);
         }
-        
+
         if (url.Contains(".svg"))
         {
             await using var svgStream = await GetStreamFromUrl(url);
             return GetColorsFromSvg(svgStream);
         }
-        
+
         await using var stream = await GetStreamFromUrl(url);
         var codec = SKCodec.Create(stream);
 
@@ -314,13 +325,13 @@ public partial class ChromeExtensionModule : Module<ChromeDataModel>
             if (codec == null)
                 throw new Exception("Invalid image format");
         }
-        
+
         using var skBitmap = SKBitmap.Decode(codec);
         var colors = ColorQuantizer.Quantize(skBitmap.Pixels, 256);
         codec.Dispose();
         return ColorQuantizer.FindAllColorVariations(colors, true);
     }
-    
+
     private async Task<Stream> GetStreamFromUrl(string url)
     {
         var request = new HttpRequestMessage(HttpMethod.Get, url);
@@ -333,10 +344,10 @@ public partial class ChromeExtensionModule : Module<ChromeDataModel>
     {
         var svg = new SKSvg();
         svg.Load(stream);
-        
+
         using var bitmap = new SKBitmap(128, 128);
         using var canvas = new SKCanvas(bitmap);
-        
+
         canvas.DrawPicture(svg.Picture);
         canvas.Flush();
         canvas.Save();
@@ -344,7 +355,7 @@ public partial class ChromeExtensionModule : Module<ChromeDataModel>
         var skClrs = ColorQuantizer.Quantize(bitmap.Pixels, 256);
         return ColorQuantizer.FindAllColorVariations(skClrs, true);
     }
-    
+
     #endregion
 
 }
