@@ -15,6 +15,7 @@ using EmbedIO;
 using Newtonsoft.Json;
 using Serilog;
 using SkiaSharp;
+using Svg.Skia;
 
 namespace Artemis.Plugins.Modules.Chrome;
 
@@ -277,31 +278,71 @@ public partial class ChromeExtensionModule : Module<ChromeDataModel>
         }
     }
 
-    private async Task<ColorSwatch> GetFavIconColorsFromUri(string uri)
+    private async Task<ColorSwatch> GetFavIconColorsFromUri(string url)
     {
         //TODO: this seems to work for *.ico but some PNGs broke. Still, no more concurrency issues
-        var matches = DataUriRegex().Match(uri);
-        if (!matches.Success)
-        {
-            await using var stream = await _httpClient.GetStreamAsync(uri);
-            using var codec = SKCodec.Create(stream);
-            using var skBitmap = SKBitmap.Decode(codec);
-            var colors = ColorQuantizer.Quantize(skBitmap.Pixels, 256);
-            return ColorQuantizer.FindAllColorVariations(colors, true);
-        }
-        else
+        var matches = DataUriRegex().Match(url);
+        if (matches.Success)
         {
             if (matches.Groups.Count < 3)
-            {
                 throw new Exception("Invalid DataUrl format");
-            }
+            if (matches.Groups["type"].Value != "image/svg+xml")
+                throw new Exception("Invalid DataUrl format");
+            await using var svgStream = new MemoryStream(Convert.FromBase64String(matches.Groups["base64svg"].Value));
 
-            using var stream = new MemoryStream(Convert.FromBase64String(matches.Groups["data"].Value));
-            using var codec = SKCodec.Create(stream);
-            using var skBitmap = SKBitmap.Decode(codec);
-            var skClrs = ColorQuantizer.Quantize(skBitmap.Pixels, 256);
-            return ColorQuantizer.FindAllColorVariations(skClrs, true);
+            return GetColorsFromSvg(svgStream);
         }
+        
+        if (url.Contains(".svg"))
+        {
+            await using var svgStream = await GetStreamFromUrl(url);
+            return GetColorsFromSvg(svgStream);
+        }
+        
+        await using var stream = await GetStreamFromUrl(url);
+        var codec = SKCodec.Create(stream);
+
+        if (codec == null)
+        {
+            //we failed to get the image with the bot user agent, try again without user agent
+            //hack: using the stream directly doesn't work for some reason
+            await using var stream3 = await _httpClient.GetStreamAsync(url);
+            var ms = new MemoryStream();
+            await stream3.CopyToAsync(ms);
+            var arr = ms.ToArray();
+            codec = SKCodec.Create(new MemoryStream(arr));
+            if (codec == null)
+                throw new Exception("Invalid image format");
+        }
+        
+        using var skBitmap = SKBitmap.Decode(codec);
+        var colors = ColorQuantizer.Quantize(skBitmap.Pixels, 256);
+        codec.Dispose();
+        return ColorQuantizer.FindAllColorVariations(colors, true);
+    }
+    
+    private async Task<Stream> GetStreamFromUrl(string url)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Get, url);
+        request.Headers.Add("User-Agent", "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)");
+        var response = await _httpClient.SendAsync(request);
+        return await response.Content.ReadAsStreamAsync();
+    }
+
+    private static ColorSwatch GetColorsFromSvg(Stream stream)
+    {
+        var svg = new SKSvg();
+        svg.Load(stream);
+        
+        using var bitmap = new SKBitmap(128, 128);
+        using var canvas = new SKCanvas(bitmap);
+        
+        canvas.DrawPicture(svg.Picture);
+        canvas.Flush();
+        canvas.Save();
+
+        var skClrs = ColorQuantizer.Quantize(bitmap.Pixels, 256);
+        return ColorQuantizer.FindAllColorVariations(skClrs, true);
     }
     
     #endregion
