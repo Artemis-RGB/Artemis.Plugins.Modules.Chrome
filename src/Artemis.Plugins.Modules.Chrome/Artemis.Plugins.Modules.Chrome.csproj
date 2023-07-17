@@ -7,8 +7,8 @@
     </PropertyGroup>
 
     <ItemGroup>
-        <PackageReference Include="ArtemisRGB.UI.Shared" IncludeAssets="compile;build;buildTransitive" Version="1.2023.414.7" />
-        <PackageReference Include="Svg.Skia" Version="1.0.0" />
+        <PackageReference Include="ArtemisRGB.UI.Shared" ExcludeAssets="runtime;native" Version="1.2023.414.7" />
+        <PackageReference Include="Svg.Skia" Version="1.0.0" ExcludeAssets="native"/>
     </ItemGroup>
 
     <ItemGroup>
