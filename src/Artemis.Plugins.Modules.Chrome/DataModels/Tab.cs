@@ -34,4 +34,6 @@ public class Tab : DataModelEventArgs
   public ColorSwatch FavIconColors { get; set; }
 
   [DataModelIgnore] internal bool ColorCalculated { get; set; } = false;
+
+  public bool YouTubeIsMusic { get; set; } = false;
 }

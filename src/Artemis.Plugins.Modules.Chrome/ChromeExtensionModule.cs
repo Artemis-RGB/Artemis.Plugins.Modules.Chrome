@@ -10,7 +10,6 @@ using Artemis.Core.ColorScience;
 using Artemis.Core.Modules;
 using Artemis.Core.Services;
 using Artemis.Plugins.Modules.Chrome.DataModels;
-using Avalonia.Markup.Xaml;
 using Newtonsoft.Json;
 using Serilog;
 using SkiaSharp;
@@ -97,6 +96,13 @@ public partial class ChromeExtensionModule : Module<ChromeDataModel>
 
             return Respond();
         });
+        _webServerService.AddResponsiveJsonEndPoint<YouTubeData>(this, "setYouTube", data =>
+        {
+            OnSetYouTube(data);
+            UpdateTabData();
+
+            return Respond();
+        });
     }
 
     public override void Disable()
@@ -142,6 +148,19 @@ public partial class ChromeExtensionModule : Module<ChromeDataModel>
     private void OnSetFullScreen(bool data)
     {
         DataModel.IsInFullscreen = data;
+    }
+
+    private void OnSetYouTube(YouTubeData data)
+    {
+        int? tabId = data.TabId;
+        if (tabId != null)
+        {
+            Tab? tab = DataModel.Tabs.Find(v => v.Id == data.TabId);
+            if (tab != null)
+            {
+                tab.YouTubeIsMusic = data.Music;
+            }
+        }
     }
 
     private void OnTabUpdated(TabUpdated data)
@@ -218,12 +237,14 @@ public partial class ChromeExtensionModule : Module<ChromeDataModel>
         {
             DataModel.AnyTabAudible = DataModel.Tabs.Any(v => v.Audible);
             DataModel.ActiveTabAudible = DataModel.Tabs.Find(v => v.Active)?.Audible ?? false;
+            DataModel.AnyMusicTabAudible = DataModel.Tabs.Any(v => v.Audible && v.YouTubeIsMusic);
             DataModel.ActiveTab = DataModel.Tabs.Find(v => v.Active);
         }
         else
         {
             DataModel.AnyTabAudible = false;
             DataModel.ActiveTabAudible = false;
+            DataModel.AnyMusicTabAudible = false;
             DataModel.ActiveTab = null;
         }
 

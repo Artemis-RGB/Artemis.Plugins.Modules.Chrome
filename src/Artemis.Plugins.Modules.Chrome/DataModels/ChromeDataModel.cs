@@ -10,6 +10,7 @@ public class ChromeDataModel : DataModel
   public bool IsInFullscreen { get; set; }
   public bool AnyTabAudible { get; set; }
   public bool ActiveTabAudible { get; set; }
+  public bool AnyMusicTabAudible { get; set; }
   public Tab? ActiveTab { get; set; }
 
   [JsonProperty(ObjectCreationHandling = ObjectCreationHandling.Replace)]
