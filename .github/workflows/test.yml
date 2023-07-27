@@ -60,5 +60,5 @@ jobs:
         run: bash <(curl https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash) 1.6.21
         shell: bash
       - name: Check workflow files
-        run: ./actionlint color
+        run: ./actionlint -color
         shell: bash
