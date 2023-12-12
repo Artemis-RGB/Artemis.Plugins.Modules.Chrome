@@ -59,7 +59,6 @@ jobs:
           name: Artemis.Plugins.Modules.Chrome
           path: src/Artemis.Plugins.Modules.Chrome/bin/Release/net7.0/publish
           if-no-files-found: error
-          retention-days: 365
 
   actionlint:
     name: Check workflow files
