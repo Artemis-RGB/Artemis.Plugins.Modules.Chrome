@@ -17,7 +17,6 @@ jobs:
   changes:
     runs-on: ubuntu-latest
     name: Gather changed files
-    if: ${{ inputs == null }}
     outputs:
       run_build: ${{ steps.changes.outputs.run_build }}
       run_actionlint: ${{ steps.changes.outputs.run_actionlint }}
